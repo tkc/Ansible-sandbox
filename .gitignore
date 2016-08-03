@@ -1,0 +1,4 @@
+ansible
+*.retry
+.idea/*
+vagrant-node/*

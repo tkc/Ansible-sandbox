@@ -1,0 +1,151 @@
+- hosts: 52.193.41.190
+  remote_user: ubuntu
+  sudo: yes
+  vars:
+    mysql_root_user: root
+    mysql_root_password: test
+    mysql_dbname: test_db
+  tasks:
+
+  - name: Prepare Install latest Node.js
+    apt_repository: repo='ppa:chris-lea/node.js'
+
+  - name: Prepare Install latest PHP 5,6
+    apt_repository: repo='ppa:ondrej/php5'
+
+  - name: update sources list1
+    apt_repository: repo="deb http://nginx.org/packages/ubuntu/ precise nginx"
+
+  - name: update sources list2
+    apt_repository: repo="deb-src http://nginx.org/packages/ubuntu/ precise nginx"
+
+  - name: PGP Key Add
+    apt_key: url=http://nginx.org/keys/nginx_signing.key
+
+  - name: Update apt-get packages
+    apt: update_cache=yes
+
+  - name: install Node.js
+    apt: pkg={{ item }} update_cache=yes
+    with_items:
+      - python-software-properties
+      - nodejs
+
+  - name: install Node.js 0.84
+    shell: bash -c '. /home/ubuntu/.nvm/nvm.sh; nvm install v0.8.4'
+
+  - name: install Node.js 5.12.0
+    shell: bash -c '. /home/ubuntu/.nvm/nvm.sh; nvm install v5.12.0'
+
+  - name: change Node.js ver
+    shell: bash -c '. /home/ubuntu/.nvm/nvm.sh; nvm use v5.12.0'
+
+  - name: change Node.js default ver
+    shell: bash -c '. /home/ubuntu/.nvm/nvm.sh; nvm alias default v5.12.0'
+
+  - name: install nginx
+    apt:  pkg=nginx update_cache=yes
+
+  - name: restart nginx
+    service: name=nginx state=restarted enabled=yes
+
+  - name: start Nginx
+    apt: pkg=nginx state=present update_cache=yes
+    notify: restart nginx
+
+  - template: src="templates/nginx/sites-available/test" dest="/etc/nginx/sites-available/test" owner=nginx group=nginx
+
+  - stat: path=/etc/nginx/sites-enabled/test
+    register: f
+  - name: make Nginx symbolic link
+    shell: ln -s /etc/nginx/sites-available/testx /etc/nginx/sites-enabled/test
+    when: not f.stat.exists
+
+  - name: install php
+    apt: pkg={{ item }} update_cache=yes
+    with_items:
+      - php5
+      - php5-cli
+      - php5-fpm
+      - php-pear
+      - php5-dev
+      - php-apc
+      - php5-mcrypt
+      - php5-gd
+      - php5-curl
+      - php5-xdebug
+      - php5-sqlite
+      - mcrypt
+
+  - name: Composer install
+    shell: curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/bin
+  - name: Composer move composer.phar to composer
+    command: mv /usr/bin/composer.phar /usr/bin/composer
+
+  - name: ensure php5-fpm cgi.fix_pathinfo=0
+    lineinfile: dest=/etc/php5/fpm/php.ini regexp='^(.*)cgi.fix_pathinfo=' line=cgi.fix_pathinfo=0
+    notify:
+      - restart php5-fpm
+      - restart nginx
+
+  - name: enable php5 mcrypt module
+    shell: php5enmod mcrypt
+    args:
+      creates: /etc/php5/cli/conf.d/20-mcrypt.ini
+
+  - name: install Mysql
+    apt: pkg={{ item }} state=present update_cache=yes
+    with_items:
+      - mysql-server-5.6
+      - mysql-client-5.6
+
+  - name: start Mysql
+    service: name=mysql state=started enabled=yes
+
+  - name: start MySQL service
+    sudo: yes
+    service:
+      name: mysql
+      state: started
+      enabled: true
+
+  - name: update MySQL root password for all root accounts
+    sudo: yes
+    mysql_user:
+      name: "{{ mysql_root_user }}"
+      host: "{{ item }}"
+      password: "{{ mysql_root_password }}"
+      login_user:  "{{ mysql_root_user }}"
+      login_password: "{{ mysql_root_password }}"
+      check_implicit_admin: yes
+      priv: "*.*:ALL,GRANT"
+    with_items:
+      - 127.0.0.1
+      - localhost
+
+  - name: create MySQL database
+    mysql_db: db={{ mysql_dbname }} state=present encoding=utf8 login_user={{ mysql_root_user }} login_password={{ mysql_root_password }}
+
+  - name: Directory create /var/www/
+    file: dest=/var/www/ state=directory owner=www-data group=www-data mode=0700
+
+  - name: install Git
+    apt: pkg={{ item }} update_cache=yes
+    with_items:
+      - git
+
+  - name: clone Git repository
+    git: >
+      dest=/var/www/laravel
+      repo=https://github.com/laravel/laravel.git
+      update=no
+    sudo: yes
+    sudo_user: www-data
+
+  handlers:
+    - name: restart php5-fpm
+      service: name=php5-fpm state=restarted
+    - name: restart nginx
+      service: name=nginx state=restarted
+    - name: restart mysql
+      service: name=mysql state=started enabled=yes
